@@ -36,7 +36,7 @@ def parse(src: str) -> str:
             return json.dumps({"metadata": j})
         return data_format_to_ulpf_adapter(j)
 
-    if re.match(r"^\s*<[\w:-]+(?:\s[^<>]*)?>[\s\S]*</[\w:-]+>\s*$", src):
+    if re.match(r"^\s*<.+>\s*$", src):
         x = parse_xml(src)
         if "error_message" in x:
             return json.dumps({"metadata": x})

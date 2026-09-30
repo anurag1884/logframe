@@ -51,6 +51,7 @@ def syslog_to_ulpf_adapter(
         "protocol_name": input_syslog.get("protocol", "unknown")
     }
     result["event"] = {
+        "event_id": "unknown",
         "severity_id": severity,
         "severity_name": get_ulpf_severity_name(severity),
         "message": input_syslog.get("message", "unknown"),

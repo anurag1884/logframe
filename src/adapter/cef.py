@@ -40,6 +40,7 @@ def cef_to_ulpf_adapter(input_cef: dict[str, str | int]) -> str:
     }
     result["connection_info"] = {"protocol_name": input_cef.get("proto", "unknown")}
     result["event"] = {
+        "event_id": "unknown",
         "severity_id": severity,
         "severity_name": get_ulpf_severity_name(severity),
         "message": input_cef.get("_cef_name", "unknown"),
