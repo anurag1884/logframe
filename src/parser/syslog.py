@@ -1,7 +1,7 @@
 import re
 from re import Match
 
-from parser.util import safe_int_cast
+from common.util import safe_int_cast
 
 FACILITIES = {
     0: "kern",
@@ -134,7 +134,7 @@ def parse_structured_data(value: str) -> dict[str, str | dict[str, str]]:
 
 def parse_rfc5424(
     log: str, pri_match: Match[str]
-) -> dict[str, str | int | None | dict[str, str | dict[str, str]]] | None:
+) -> dict[str, str | int | tuple[str] | dict[str, str | dict[str, str]]] | None:
     rest = log[pri_match.end() :]
 
     m = re.match(r"^(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.*)$", rest)
@@ -144,29 +144,31 @@ def parse_rfc5424(
     version, time, hostname, app, procid, msgid, tail = m.groups()
 
     structured_data = "-"
-    message = ""
+    message = tail
 
     if tail.startswith("["):
         sd = re.match(r"^((?:\[[^\]]*\])+)(?:\s+(.*))?$", tail)
         if sd:
             structured_data = sd.group(1)
             message = sd.group(2) or ""
-        else:
-            message = tail
-    else:
-        message = tail
 
     result = {
         "format": "RFC5424",
         "version": safe_int_cast(version),
-        "time": None if time == "-" else time,
-        "hostname": None if hostname == "-" else hostname,
-        "app_name": None if app == "-" else app,
-        "process_id": None if procid == "-" else procid,
-        "message_id": None if msgid == "-" else msgid,
         "structured_data": parse_structured_data(structured_data),
         "message": message,
     }
+
+    if time != "-":
+        result["time"] = time
+    if hostname != "-":
+        result["hostname"] = (hostname,)
+    if app != "-":
+        result["app_name"] = (app,)
+    if procid != "-":
+        result["process_id"] = (procid,)
+    if msgid != "-":
+        result["message_id"] = (msgid,)
 
     result.update(parse_network_fields(message))
     return result
@@ -174,7 +176,7 @@ def parse_rfc5424(
 
 def parse_rfc3164(
     log: str, pri_match: Match[str]
-) -> dict[str, str | int | None | dict[str, str]] | None:
+) -> dict[str, str | int | dict[str, str]] | None:
     rest = log[pri_match.end() :]
 
     m = re.match(
@@ -185,37 +187,40 @@ def parse_rfc3164(
     if not m:
         return None
 
+    result = {}
+
     time, hostname, tag, message = m.groups()
 
     app_name = tag
-    process_id = None
 
     pid = re.match(r"^(.+?)\[(\d+)\]$", tag)
     if pid:
         app_name = pid.group(1)
-        process_id = pid.group(2)
+        result["process_id"] = pid.group(2)
 
     structured_data: dict[str, str] = {}
 
-    result = {
-        "format": "RFC3164",
-        "version": None,
-        "time": time,
-        "hostname": hostname,
-        "app_name": app_name,
-        "process_id": process_id,
-        "message_id": None,
-        "structured_data": structured_data,
-        "message": message,
-    }
+    result.update(
+        {
+            "format": "RFC3164",
+            "time": time,
+            "hostname": hostname,
+            "app_name": app_name,
+            "structured_data": structured_data,
+            "message": message,
+        }
+    )
 
     result.update(parse_network_fields(message))
+
     return result
 
 
 def parse_syslog(
     log: str,
-) -> dict[str, str | int | None | dict[str, str | dict[str, str]] | dict[str, str]]:
+) -> dict[
+    str, str | int | tuple[str] | dict[str, str | dict[str, str]] | dict[str, str]
+]:
     log = log.strip()
 
     if not log:

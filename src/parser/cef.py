@@ -1,6 +1,6 @@
 import re
 
-from parser.util import safe_int_cast
+from common.util import safe_int_cast
 
 
 def parse_cef(log_line: str) -> dict[str, str | int]:
