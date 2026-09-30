@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -9,7 +10,7 @@ from sample.cef import SAMPLE_CEF_LOGS
 from sample.syslog import SAMPLE_SYSLOGS
 
 
-def syslog_severity_to_ulpf(sid):
+def syslog_severity_to_ulpf(sid: str) -> int:
     if sid == "0" or sid == "1":
         return 5
     elif sid == "2" or sid == "3":
@@ -24,7 +25,7 @@ def syslog_severity_to_ulpf(sid):
         return -1
 
 
-def cef_severity_to_ulpf(cid):
+def cef_severity_to_ulpf(cid: str) -> int:
     if cid == "0" or cid == "1" or cid == "2" or cid == "3":
         return 1
     elif cid == "4":
@@ -39,7 +40,7 @@ def cef_severity_to_ulpf(cid):
         return -1
 
 
-def get_ulpf_severity_name(uid):
+def get_ulpf_severity_name(uid: int) -> str:
     if uid == 1:
         return "informational"
     elif uid == 2:
@@ -54,10 +55,10 @@ def get_ulpf_severity_name(uid):
         return "unknown"
 
 
-def get_as_utc_timestamp(raw, zone):
+def get_as_utc_timestamp(raw: str, zone: str) -> int:
     try:
         tz = ZoneInfo(zone)
-    except (ZoneInfoNotFoundError, ValueError):
+    except ZoneInfoNotFoundError:
         return -1
     year = datetime.now(tz).year
     try:
@@ -70,7 +71,7 @@ def get_as_utc_timestamp(raw, zone):
         return -1
 
 
-def get_utc_timestamp(raw):
+def get_utc_timestamp(raw: str) -> int:
     return int(
         datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ")
         .replace(tzinfo=timezone.utc)
@@ -78,7 +79,11 @@ def get_utc_timestamp(raw):
     )
 
 
-def syslog_to_ulpf_json(input_syslog):
+def syslog_to_ulpf_json(
+    input_syslog: dict[
+        str, str | int | None | dict[str, str | dict[str, str]] | dict[str, str]
+    ],
+) -> str:
     result = {}
 
     if "severity" in input_syslog:
@@ -86,9 +91,9 @@ def syslog_to_ulpf_json(input_syslog):
     else:
         severity = -1
 
-    if "timestamp" in input_syslog:
+    if "time" in input_syslog:
         result["timestamp"] = get_as_utc_timestamp(
-            input_syslog["timestamp"], "Asia/Kolkata"
+            str(input_syslog["time"]), "Asia/Kolkata"
         )
     else:
         result["timestamp"] = -1
@@ -137,11 +142,11 @@ def syslog_to_ulpf_json(input_syslog):
     return json.dumps(result)
 
 
-def cef_to_ulpf_json(input_cef):
+def cef_to_ulpf_json(input_cef: dict[str, str | int]) -> str:
     result = {}
 
     if "_cef_severity" in input_cef:
-        severity = syslog_severity_to_ulpf(input_cef["_cef_severity"])
+        severity = syslog_severity_to_ulpf(str(input_cef["_cef_severity"]))
     else:
         severity = -1
 
@@ -183,14 +188,14 @@ def cef_to_ulpf_json(input_cef):
     return json.dumps(result)
 
 
-def get_json_attr(input_json, attrs):
+def get_json_attr(input_json: dict[str, str], attrs: tuple[str, ...]) -> str:
     for attr in attrs:
         if attr in input_json:
             return input_json[attr]
     return "unknown"
 
 
-def json_to_ulpf_json(input_json, raw_data):
+def json_to_ulpf_json(input_json: dict[str, str], raw_data: str) -> str:
     result = {}
 
     try:
@@ -198,8 +203,10 @@ def json_to_ulpf_json(input_json, raw_data):
     except (KeyError, ValueError):
         severity = -1
 
-    if "timestamp" in input_json:
-        result["timestamp"] = get_utc_timestamp(input_json["timestamp"])
+    if "time" in input_json:
+        result["timestamp"] = get_utc_timestamp(input_json["time"])
+    elif "timestamp" in input_json:
+        result["timestamp"] = input_json["timestamp"]
     else:
         result["timestamp"] = -1
 
@@ -210,7 +217,7 @@ def json_to_ulpf_json(input_json, raw_data):
         "port": safe_int_cast(
             get_json_attr(
                 input_json,
-                ("src_port", "srcport", "sport", "source_port", "sourceport"),
+                ("src_port", "srcport", "sport", "spt", "source_port", "sourceport"),
             )
         ),
         "hostname": get_json_attr(
@@ -224,7 +231,14 @@ def json_to_ulpf_json(input_json, raw_data):
         "port": safe_int_cast(
             get_json_attr(
                 input_json,
-                ("dst_port", "dstport", "dport", "destination_port", "destinationport"),
+                (
+                    "dst_port",
+                    "dstport",
+                    "dport",
+                    "dpt",
+                    "destination_port",
+                    "destinationport",
+                ),
             )
         ),
         "hostname": get_json_attr(
@@ -258,22 +272,33 @@ def json_to_ulpf_json(input_json, raw_data):
     return json.dumps(result)
 
 
-def seq_parse(src):
-    c = parse_cef(src)
-    if c is not None:
+def seq_parse(src: str) -> str:
+    if src.startswith("CEF"):
+        c = parse_cef(src)
+        if "error_message" in c:
+            return json.dumps({"metadata": c})
         return cef_to_ulpf_json(c)
 
-    sl = parse_syslog(src)
-    if sl is not None:
-        return syslog_to_ulpf_json(sl)
+    # if src.startsWith("LEEF"):
+    #     l = parse_leef(src)
+    #     if "error_message" in l:
+    #         return {"metadata": {"format": "leef", **l}}
+    #     return leef_to_ulpf_Json(l)
+
+    if re.match(r"^<\d+>", src):
+        s = parse_syslog(src)
+        if s is not None:
+            if "error_message" in s:
+                return json.dumps({"metadata": s})
+            return syslog_to_ulpf_json(s)
 
     try:
         j = json.loads(src)
         return json_to_ulpf_json(j, src)
-    except json.JSONDecodeError:
-        pass
-
-    return json.dumps({"format": "unknown", "raw_data": src})
+    except json.JSONDecodeError as e:
+        return json.dumps(
+            {"metadata": {"format": "json", "error_message": e.msg, "raw_data": src}}
+        )
 
 
 for log in SAMPLE_SYSLOGS + SAMPLE_CEF_LOGS:

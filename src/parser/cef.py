@@ -3,23 +3,21 @@ import re
 from parser.util import safe_int_cast
 
 
-def parse_cef(log_line):
-    header_parts = re.split(r"(?<!\\)\|", log_line)
+def parse_cef(log_line: str) -> dict[str, str | int]:
+    header_parts: list[str] = re.split(r"(?<!\\)\|", log_line)
 
     if len(header_parts) < 8:
-        # return {
-        #     "error": f"Invalid CEF format: expected at least 8 pipe-delimited header fields, got {len(header_parts)}",
-        #     "raw_data": log_line,
-        # }
-        return None
+        return {
+            "error_message": f"Invalid CEF format: expected at least 8 pipe-delimited header fields, got {len(header_parts)}",
+            "raw_data": log_line,
+        }
 
     version_field = header_parts[0]
     if not version_field.upper().startswith("CEF:"):
-        # return {
-        #     "error": f"Invalid CEF format: log line must begin with 'CEF:', got '{version_field[:10]}'",
-        #     "raw_data": log_line,
-        # }
-        return None
+        return {
+            "error_message": f"Invalid CEF format: log line must begin with 'CEF:', got '{version_field[:10]}'",
+            "raw_data": log_line,
+        }
 
     version = version_field[4:]
     vendor = header_parts[1].replace("\\|", "|")

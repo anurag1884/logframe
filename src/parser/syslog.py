@@ -1,4 +1,5 @@
 import re
+from re import Match
 
 from parser.util import safe_int_cast
 
@@ -41,21 +42,21 @@ SEVERITIES = {
 }
 
 
-def parse_priority(value):
+def parse_priority(value: str) -> dict[str, str | int] | None:
     try:
-        value = safe_int_cast(value)
+        val_int = int(value)
     except ValueError:
         return None
     return {
-        "priority": value,
-        "facility": value // 8,
-        "facility_name": FACILITIES.get(value // 8, "unknown"),
-        "severity": value % 8,
-        "severity_name": SEVERITIES.get(value % 8, "unknown"),
+        "priority": val_int,
+        "facility": val_int // 8,
+        "facility_name": FACILITIES.get(val_int // 8, "unknown"),
+        "severity": val_int % 8,
+        "severity_name": SEVERITIES.get(val_int % 8, "unknown"),
     }
 
 
-def parse_network_fields(message):
+def parse_network_fields(message: str) -> dict[str, str | int]:
     fields = {}
 
     patterns = {
@@ -103,7 +104,7 @@ def parse_network_fields(message):
     return fields
 
 
-def parse_structured_data(value):
+def parse_structured_data(value: str) -> dict[str, str | dict[str, str]]:
     if value == "-":
         return {}
 
@@ -131,14 +132,16 @@ def parse_structured_data(value):
     return result
 
 
-def parse_rfc5424(log, pri_match):
+def parse_rfc5424(
+    log: str, pri_match: Match[str]
+) -> dict[str, str | int | None | dict[str, str | dict[str, str]]] | None:
     rest = log[pri_match.end() :]
 
     m = re.match(r"^(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.*)$", rest)
     if not m:
         return None
 
-    version, timestamp, hostname, app, procid, msgid, tail = m.groups()
+    version, time, hostname, app, procid, msgid, tail = m.groups()
 
     structured_data = "-"
     message = ""
@@ -156,7 +159,7 @@ def parse_rfc5424(log, pri_match):
     result = {
         "format": "RFC5424",
         "version": safe_int_cast(version),
-        "timestamp": None if timestamp == "-" else timestamp,
+        "time": None if time == "-" else time,
         "hostname": None if hostname == "-" else hostname,
         "app_name": None if app == "-" else app,
         "process_id": None if procid == "-" else procid,
@@ -169,7 +172,9 @@ def parse_rfc5424(log, pri_match):
     return result
 
 
-def parse_rfc3164(log, pri_match):
+def parse_rfc3164(
+    log: str, pri_match: Match[str]
+) -> dict[str, str | int | None | dict[str, str]] | None:
     rest = log[pri_match.end() :]
 
     m = re.match(
@@ -180,7 +185,7 @@ def parse_rfc3164(log, pri_match):
     if not m:
         return None
 
-    timestamp, hostname, tag, message = m.groups()
+    time, hostname, tag, message = m.groups()
 
     app_name = tag
     process_id = None
@@ -190,15 +195,17 @@ def parse_rfc3164(log, pri_match):
         app_name = pid.group(1)
         process_id = pid.group(2)
 
+    structured_data: dict[str, str] = {}
+
     result = {
         "format": "RFC3164",
         "version": None,
-        "timestamp": timestamp,
+        "time": time,
         "hostname": hostname,
         "app_name": app_name,
         "process_id": process_id,
         "message_id": None,
-        "structured_data": {},
+        "structured_data": structured_data,
         "message": message,
     }
 
@@ -206,34 +213,41 @@ def parse_rfc3164(log, pri_match):
     return result
 
 
-def parse_syslog(log):
+def parse_syslog(
+    log: str,
+) -> dict[str, str | int | None | dict[str, str | dict[str, str]] | dict[str, str]]:
     log = log.strip()
 
     if not log:
-        # return {"error": "Empty Syslog", "raw_data": log}
-        return None
+        return {"format": "syslog", "error_message": "Empty Syslog", "raw_data": log}
 
-    pri = re.match(r"^<(\d+)>", log)
+    pri: Match[str] | None = re.match(r"^<(\d+)>", log)
 
     if not pri:
-        # return {"error": "Invalid Syslog: PRI <number> not found", "raw_data": log}
-        return None
+        return {
+            "format": "syslog",
+            "error_message": "Invalid Syslog: PRI <number> not found",
+            "raw_data": log,
+        }
 
-    result = parse_priority(pri.group(1))
+    result = {}
+
+    priority = parse_priority(pri.group(1))
+    if priority is None:
+        result.update({"format": "syslog", "message": "Invalid priority value"})
+    else:
+        result.update(priority)
 
     parsed = parse_rfc5424(log, pri)
     if parsed is None:
         parsed = parse_rfc3164(log, pri)
 
     if parsed is None:
-        result.update({"format": "UNKNOWN", "message": log[pri.end() :]})
+        result.update({"format": "unknown", "message": log[pri.end() :]})
     else:
         result.update(parsed)
 
     # ULPF requires the original source event to be preserved.
     result["raw_data"] = log
-
-    # Parser exposes source-specific values; normalizer maps them later.
-    # result["unmapped"] = {}
 
     return result
